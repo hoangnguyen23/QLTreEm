@@ -1,7 +1,7 @@
 const z = require("zod")
 
 const getUsersQuerySchema = z.object({
-  role: z.enum(["ADMIN", "USER"]).optional(),
+  role: z.enum(["ADMIN", "PARENT", "CHILD"]).optional(),
   search: z.string().trim().default(""),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(10),
@@ -23,11 +23,11 @@ const updateUserBodySchema = z.object({
   name: z.string().optional(),
   phone: z.string().optional(),
   address: z.string().optional(),
-  email: z.email().optional(),
+  email: z.string().email().optional(),
 })
 
 const updateRoleBodySchema = z.object({
-  role: z.enum(["ADMIN", "USER"]),
+  role: z.enum(["ADMIN", "PARENT", "CHILD"]),
 })
 
 const getUsersSchema = z.object({

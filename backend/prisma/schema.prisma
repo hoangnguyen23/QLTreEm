@@ -19,10 +19,8 @@ datasource db {
 
 enum Role {
   ADMIN
-  STAFF
   PARENT
   CHILD
-  USER
 }
 
 enum DevicePlatform {
