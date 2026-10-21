@@ -1,0 +1,325 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========================
+// ENUMS
+// ========================
+
+enum Role {
+  ADMIN
+  STAFF
+  PARENT
+  CHILD
+  USER
+}
+
+enum DevicePlatform {
+  ANDROID
+  IOS
+  OTHER
+}
+
+enum OtpPurpose {
+  REGISTER
+  LOGIN
+}
+
+enum DeviceStatus {
+  ACTIVE
+  INACTIVE
+  LOST
+  UNPAIRED
+}
+
+enum PairingStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  CANCELLED
+}
+
+enum AlertType {
+  SAFE_ZONE_EXIT
+  DEVICE_OFFLINE
+  LOW_BATTERY
+  SCREEN_TIME_LIMIT
+  OTHER
+}
+
+enum AlertStatus {
+  UNREAD
+  READ
+  RESOLVED
+}
+
+// ========================
+// USER & AUTHENTICATION
+// ========================
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(PARENT)
+  phone     String?
+  address   String?
+  isActive  Boolean  @default(true)
+  emailVerified Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refreshTokens RefreshToken[]
+
+  // Phụ huynh quản lý hồ sơ trẻ
+  children ChildProfile[] @relation("ParentChildren")
+
+  // Tài khoản riêng của trẻ (nếu có)
+  childProfile ChildProfile? @relation("ChildAccount")
+
+  // QR pairing
+  pairings DevicePairing[] @relation("PairingCreator")
+
+  // Cảnh báo được nhận
+  alerts Alert[] @relation("AlertRecipient")
+
+  // Nhật ký thao tác
+  auditLogs AuditLog[] @relation("AuditActor")
+
+  otpVerifications OtpVerification[]
+
+  @@index([role, isActive])
+  @@index([createdAt])
+}
+
+model RefreshToken {
+  id           String   @id @default(uuid())
+  refreshToken String   @unique
+  userId       String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model OtpVerification {
+  id         String     @id @default(uuid())
+  email      String
+  codeHash   String
+  purpose    OtpPurpose
+  expiresAt  DateTime
+  attempts   Int        @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime   @default(now())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email, purpose, createdAt])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ========================
+// CHILD PROFILE
+// ========================
+
+model ChildProfile {
+  id          String    @id @default(uuid())
+  name        String
+  dateOfBirth DateTime?
+  avatarUrl   String?
+  notes       String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Phụ huynh quản lý trẻ
+  parentId String
+  parent   User   @relation("ParentChildren", fields: [parentId], references: [id], onDelete: Cascade)
+
+  // Có thể liên kết tài khoản đăng nhập riêng của trẻ
+  childUserId String? @unique
+  childUser   User?   @relation("ChildAccount", fields: [childUserId], references: [id], onDelete: SetNull)
+
+  devices   Device[]
+  pairings  DevicePairing[]
+  safeZones SafeZone[]
+
+  @@index([parentId])
+  @@index([isActive])
+}
+
+// ========================
+// CHILD DEVICES
+// ========================
+
+model Device {
+  id               String         @id @default(uuid())
+  name             String
+  deviceIdentifier String         @unique
+  platform         DevicePlatform
+  status           DeviceStatus   @default(UNPAIRED)
+  isActive         Boolean        @default(true)
+  lastSeenAt       DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  childProfileId String
+  childProfile   ChildProfile @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
+
+  pairings  DevicePairing[]
+  locations LocationRecord[]
+  alerts    Alert[]
+
+  @@index([childProfileId])
+  @@index([status, isActive])
+}
+
+// ========================
+// FEATURE 1: QR CODE PAIRING
+// ========================
+
+model DevicePairing {
+  id String @id @default(uuid())
+
+  // Chỉ lưu hash của mã bí mật, không lưu token QR dạng rõ
+  tokenHash String @unique
+
+  status    PairingStatus @default(PENDING)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  parentId String
+  parent   User   @relation("PairingCreator", fields: [parentId], references: [id], onDelete: Cascade)
+
+  childProfileId String
+  childProfile   ChildProfile @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
+
+  deviceId String?
+  device   Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([parentId, status])
+  @@index([childProfileId])
+  @@index([expiresAt])
+}
+
+// ========================
+// FEATURE 2: FINGERPRINT
+// ========================
+
+// Không lưu dấu vân tay trong database.
+// Xác thực bằng sinh trắc học của Android/iOS.
+// Bảng này lưu trạng thái bật xác thực và thời điểm đăng ký.
+
+model BiometricSetting {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  enabled   Boolean  @default(false)
+  method    String   @default("BIOMETRIC")
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([enabled])
+}
+
+// ========================
+// FEATURE 3: GPS LOCATION
+// ========================
+
+model LocationRecord {
+  id         String   @id @default(uuid())
+  latitude   Float
+  longitude  Float
+  accuracy   Float?
+  altitude   Float?
+  speed      Float?
+  recordedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, recordedAt])
+  @@index([recordedAt])
+}
+
+// ========================
+// SAFE ZONES
+// ========================
+
+model SafeZone {
+  id        String   @id @default(uuid())
+  name      String
+  latitude  Float
+  longitude Float
+  radius    Float // Bán kính mét
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  childProfileId String
+  childProfile   ChildProfile @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
+
+  @@index([childProfileId, isActive])
+}
+
+// ========================
+// ALERTS
+// ========================
+
+model Alert {
+  id         String      @id @default(uuid())
+  type       AlertType
+  status     AlertStatus @default(UNREAD)
+  title      String
+  message    String
+  createdAt  DateTime    @default(now())
+  readAt     DateTime?
+  resolvedAt DateTime?
+
+  recipientId String
+  recipient   User   @relation("AlertRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  deviceId String?
+  device   Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId, status, createdAt])
+  @@index([deviceId, createdAt])
+}
+
+// ========================
+// AUDIT LOG
+// ========================
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  actorId String?
+  actor   User?   @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId])
+}
