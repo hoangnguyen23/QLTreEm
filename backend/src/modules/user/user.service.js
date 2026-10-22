@@ -74,7 +74,18 @@ const getProfile = async (id) => {
       email: true,
       phone: true,
       address: true,
+      role: true,
+      emailVerified: true,
+      childProfile: {
+        include: {
+          parent: {
+            select: { id: true, name: true, phone: true, email: true },
+          },
+          devices: true,
+        },
+      },
       createdAt: true,
+      updatedAt: true,
     },
   })
 
@@ -106,6 +117,8 @@ const updateProfile = async (id, body) => {
       email: true,
       phone: true,
       address: true,
+      role: true,
+      updatedAt: true,
     },
   })
 }
@@ -136,7 +149,7 @@ const updateUser = async (id, body) => {
         phone: true,
         address: true,
         role: true,
-        updateAt: true,
+        updatedAt: true,
       },
     })
   } catch (error) {
@@ -161,7 +174,7 @@ const updateRole = async (id, body) => {
         name: true,
         email: true,
         role: true,
-        updateAt: true,
+        updatedAt: true,
       },
     })
   } catch (error) {

@@ -1,8 +1,7 @@
 const userService = require("./user.service")
 const { getUsersSchema } = require("./user.validate")
 const getUsers = async (req, res) => {
-  const query = getUsersSchema.parse(req.query)
-  const result = await userService.getUsers(query)
+  const result = await userService.getUsers(req.query || {})
   return res.status(200).json({
     success: true,
     data: result
